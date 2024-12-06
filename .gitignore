@@ -1,0 +1,4 @@
+*.tiff
+*.tif
+catboost_info/*
+masks/*
