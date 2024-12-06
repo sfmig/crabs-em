@@ -47,7 +47,7 @@ print(annotations_stack.shape)  # (3072, 4096, 250)
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # plot annotations for a sample image
 
-sel_idx = 6
+sel_idx = 15
 image_array = image_stack[:, :, sel_idx]
 annotations_array = annotations_stack[:, :, sel_idx]
 
@@ -98,6 +98,12 @@ features, targets = conv_paint.get_features_current_layers(
 # train classifier
 random_forest = conv_paint.train_classifier(features, targets)
 
+# plot training image
+plt.figure()
+plt.imshow(image_stack[:, :, image_idx_train], cmap="gray")
+plt.imshow(annotations_stack[:, :, image_idx_train], alpha=0.5, cmap="viridis", interpolation="nearest")
+plt.colorbar()
+plt.title(f"Training sample: {image_idx_train}")
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Run inference on another image (e.g. 15) ---> this throws an error
@@ -189,7 +195,7 @@ if padding > 0:
 plt.figure()
 plt.imshow(image_stack[:, :, image_idx], cmap="gray")
 plt.imshow(predicted_image.T, alpha=0.5, cmap="viridis", interpolation="nearest")
-plt.title("Prediction")
+plt.title(f"Prediction sample: {image_idx} ")
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # TODO next:
