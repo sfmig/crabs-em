@@ -70,11 +70,8 @@ dinov2_vits14 = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dinov2_vits14.to(device)
 
-
-# %%
-search_file = coll.files[0]
+# compute embeddings
 with torch.no_grad():
-    # embedding = dinov2_vits14(load_image(search_file).to(device))
     embeddings_array = dinov2_vits14(transformed_image_stack.to(device))
 
 print(embeddings_array.shape)  # 250, 384
