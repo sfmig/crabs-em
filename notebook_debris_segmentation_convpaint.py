@@ -26,8 +26,8 @@ print(len(coll))  # 250
 
 
 # read stack as array
-image_stack = np.moveaxis(np.array(coll), 0, -1)
-print(image_stack.shape)  # x (rows), y (cols), n_images, # (3072, 4096, 250)
+image_stack = np.array(coll)
+print(image_stack.shape)  # (250, 3072, 4096) ==> n_images, x (rows), y (cols)
 
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -38,18 +38,18 @@ annotations_coll = io.ImageCollection(str(annotations_dir) + "/*.tif")
 print(len(annotations_coll))  # 250
 
 # read annotations as array
-annotations_stack = np.moveaxis(np.array(annotations_coll) + 1.0, 0, -1)
+annotations_stack = np.array(annotations_coll) + 1.0
 # we add +1 to annotations to match the labels in the napari-convpaint library
 # Initially: 0 = background, 1 = debris
 # Now: 1 = background, 2 = debris, 0 = no annotation
-print(annotations_stack.shape)  # (3072, 4096, 250)
+print(annotations_stack.shape)  # (250, 3072, 4096)
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # plot annotations for a sample image
 
 sel_idx = 15
-image_array = image_stack[:, :, sel_idx]
-annotations_array = annotations_stack[:, :, sel_idx]
+image_array = image_stack[sel_idx, :, :]
+annotations_array = annotations_stack[sel_idx, :, :]
 
 plt.figure()
 plt.imshow(image_array, cmap="gray")
@@ -74,23 +74,23 @@ model = conv_paint.create_model(param)
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Define train / test split --- skip for now
-# n_training_samples = 20
-# n_test_samples = image_stack.shape[-1] - n_training_samples
+n_training_samples = 10
+n_test_samples = image_stack.shape[0] - n_training_samples
 
-# rng = np.random.default_rng(42)
-# train_idcs = rng.choice(image_stack.shape[-1], n_training_samples, replace=False)
-# test_idcs = np.setdiff1d(np.arange(image_stack.shape[-1]), train_idcs)
+rng = np.random.default_rng(42)
+train_idcs = rng.choice(image_stack.shape[0], n_training_samples, replace=False)
+test_idcs = np.setdiff1d(np.arange(image_stack.shape[0]), train_idcs)
 
-# print(train_idcs)
-# print(test_idcs)
+print(train_idcs)
+print(test_idcs)
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Train pixel classifier on one image
 image_idx_train = 15
 # get embedding for input image
 features, targets = conv_paint.get_features_current_layers(
-    np.moveaxis(image_stack[:, :, image_idx_train], -1, 0),
-    np.moveaxis(annotations_stack[:, :, image_idx_train], -1, 0),
+    image_stack[image_idx_train, :, :],
+    annotations_stack[image_idx_train, :, :],
     model=model,
     param=param,
 )
@@ -100,8 +100,13 @@ random_forest = conv_paint.train_classifier(features, targets)
 
 # plot training image
 plt.figure()
-plt.imshow(image_stack[:, :, image_idx_train], cmap="gray")
-plt.imshow(annotations_stack[:, :, image_idx_train], alpha=0.5, cmap="viridis", interpolation="nearest")
+plt.imshow(image_stack[image_idx_train, :, :], cmap="gray")
+plt.imshow(
+    annotations_stack[image_idx_train, :, :],
+    alpha=0.5,
+    cmap="viridis",
+    interpolation="nearest",
+)
 plt.colorbar()
 plt.title(f"Training sample: {image_idx_train}")
 
@@ -114,9 +119,7 @@ plt.title(f"Training sample: {image_idx_train}")
 image_idx_eval = 6
 
 prediction = model.predict_image(
-    image=np.moveaxis(
-        image_stack[:, :, image_idx_eval], -1, 0
-    ),  # move channels to the front
+    image=image_stack[image_idx_eval, :, :],
     classifier=random_forest,
     param=param,
 )
@@ -131,7 +134,7 @@ prediction = model.predict_image(
 # for sanity check: evaluate on same image as training
 # (that should be the best performance)
 image_idx = 42  # 6, 15, 21, 29
-image = np.moveaxis(image_stack[:, :, image_idx], -1, 0)
+image = image_stack[image_idx, :, :]
 classifier = random_forest
 param = param
 
@@ -193,8 +196,8 @@ if padding > 0:
 
 # %%
 plt.figure()
-plt.imshow(image_stack[:, :, image_idx], cmap="gray")
-plt.imshow(predicted_image.T, alpha=0.5, cmap="viridis", interpolation="nearest")
+plt.imshow(image_stack[image_idx, :, :], cmap="gray")
+plt.imshow(predicted_image, alpha=0.5, cmap="viridis", interpolation="nearest")
 plt.title(f"Prediction sample: {image_idx} ")
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
