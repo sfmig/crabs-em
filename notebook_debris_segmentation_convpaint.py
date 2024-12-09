@@ -67,48 +67,88 @@ param = conv_paint_param.Param()
 param.fe_name = "dinov2_vits14_reg"
 param.fe_scalings = [1]
 param.fe_order = 0
-param.image_downsample = 10  # 1
+param.image_downsample = 10  # 8
 
 # create model
 model = conv_paint.create_model(param)
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# Define train / test split --- skip for now
-n_training_samples = 10
-n_test_samples = image_stack.shape[0] - n_training_samples
+# Images classified with debris
+# (from classification notebook)
+idcs_images_w_debris = [
+    6,
+    15,
+    21,
+    24,
+    29,
+    40,
+    41,
+    42,
+    58,
+    72,
+    82,
+    84,
+    86,
+    104,
+    105,
+    109,
+    125,
+    156,
+    157,
+    165,
+    167,
+    170,
+    176,
+    178,
+    181,
+    186,
+    200,
+    206,
+    207,
+    210,
+    227,
+    228,
+    231,
+    242,
+    243,
+    246,
+]
+
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# Define train / test split only on images with debris
+n_training_samples = math.ceil(0.8*len(idcs_images_w_debris))
+n_test_samples = len(idcs_images_w_debris) - n_training_samples
 
 rng = np.random.default_rng(42)
-train_idcs = rng.choice(image_stack.shape[0], n_training_samples, replace=False)
-test_idcs = np.setdiff1d(np.arange(image_stack.shape[0]), train_idcs)
+train_idcs = rng.choice(idcs_images_w_debris, n_training_samples, replace=False)
+test_idcs = np.setdiff1d(idcs_images_w_debris, train_idcs)
 
 print(train_idcs)
 print(test_idcs)
 
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# Train pixel classifier on one image
-image_idx_train = 15
-# get embedding for input image
-features, targets = conv_paint.get_features_current_layers(
-    image_stack[image_idx_train, :, :],
-    annotations_stack[image_idx_train, :, :],
-    model=model,
-    param=param,
-)
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%§
+# Train pixel classifier on multiple debris images
+# TODO: normalise image stack?
 
+all_features, all_targets = [], []
+for idx in train_idcs:
+    features, targets = conv_paint.get_features_current_layers(
+        image_stack[idx, :, :],
+        annotations_stack[idx, :, :],
+        model=model,
+        param=param,
+    )
+    all_features.append(features)
+    all_targets.append(targets)
+
+features_array = np.concatenate(all_features, axis=0)
+targets_array = np.concatenate(all_targets, axis=0)
+
+# %%
 # train classifier
-random_forest = conv_paint.train_classifier(features, targets)
+random_forest = conv_paint.train_classifier(features_array, targets_array)
 
-# plot training image
-plt.figure()
-plt.imshow(image_stack[image_idx_train, :, :], cmap="gray")
-plt.imshow(
-    annotations_stack[image_idx_train, :, :],
-    alpha=0.5,
-    cmap="viridis",
-    interpolation="nearest",
-)
-plt.colorbar()
-plt.title(f"Training sample: {image_idx_train}")
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Run inference on another image (e.g. 15) ---> this throws an error
@@ -133,76 +173,71 @@ prediction = model.predict_image(
 
 # for sanity check: evaluate on same image as training
 # (that should be the best performance)
-image_idx = 42  # 6, 15, 21, 29
-image = image_stack[image_idx, :, :]
-classifier = random_forest
-param = param
+for image_idx in test_idcs: 
+    # inputs
+    image = image_stack[image_idx, :, :]
+    classifier = random_forest
+    param = param
 
-# add padding to the image
-padding = param.fe_padding
-if image.ndim == 2:
-    image = np.expand_dims(image, axis=0)  # if 2d, prepend an additional dimension
-image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode="reflect")
+    # add padding to the image if required
+    padding = param.fe_padding
+    if image.ndim == 2:
+        image = np.expand_dims(image, axis=0)  # if 2d, prepend an additional dimension
+    image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode="reflect")
 
-# get features
-features = model.get_features_scaled(image, param, return_patches=True)
-nb_features = features.shape[0]  # [nb_features, width, height]
-w_patch = features.shape[
-    -2
-]  # -----> why in original code is features.shape[-2] / param.image_downsample?
-h_path = features.shape[
-    -1
-]  # -----> why in original code is features.shape[-1] / param.image_downsample?
-# Last two lines are originally:
-# w_patch = np.ceil(features.shape[-2] / param.image_downsample).astype(int)
-# h_path = np.ceil(features.shape[-1] / param.image_downsample).astype(int)
+    # compute feature vectors for each block of pixels (?) in downscaled image
+    features = model.get_features_scaled(image, param, return_patches=True)
+    nb_features = features.shape[0]  # [nb_features, width, height]
+    w_patch = features.shape[-2]
+    h_path = features.shape[-1]
+    # Last two lines are originally:
+    # w_patch = np.ceil(features.shape[-2] / param.image_downsample).astype(int)
+    # h_path = np.ceil(features.shape[-1] / param.image_downsample).astype(int)
 
+    print(features.shape)  # [nb_features, width, height]
+    print(w_patch)
+    print(h_path)
+    print(w_patch * h_path)
 
-print(features.shape)  # [nb_features, width, height]
-print(w_patch)
-print(h_path)
-print(w_patch * h_path)
+    # predict label for  features
+    # move features to last dimension
+    # (we need to make it 1d-array for RF = random forest)
+    features = np.moveaxis(features, 0, -1)  # [width, height, nb_features]
+    features = np.reshape(features, (-1, nb_features))  # [width*height, nb_features]
+    print(features.shape)
 
-# %%
-# predict label for  features
-# move features to last dimension
-# (we need to make it 1d-array for RF = random forest)
-features = np.moveaxis(features, 0, -1)  # [width, height, nb_features]
-features = np.reshape(features, (-1, nb_features))  # [width*height, nb_features]
-print(features.shape)
+    # predict using trained random forest classifier
+    predictions = classifier.predict(pd.DataFrame(features))
+    print(predictions.shape)  # 638
 
-# predict using trained random forest classifier
-predictions = classifier.predict(pd.DataFrame(features))
+    # reshape predictions to feature shape
+    predicted_image = np.reshape(predictions, [w_patch, h_path])
+    print(predicted_image.shape)  # (29, 22)
 
-print(predictions.shape)
-# %%
-# reshape predictions to original image shape
-predicted_image = np.reshape(predictions, [w_patch, h_path])
-print(predicted_image.shape)  # (29, 22)
+    # resize predicted image to original image size
+    predicted_image = skimage.transform.resize(
+        image=predicted_image,
+        output_shape=(image.shape[-2], image.shape[-1]),
+        preserve_range=True,
+        order=param.fe_order,
+    ).astype(np.uint8)
+    print(predicted_image.shape)  # (4096, 3072)
 
-# %%
-predicted_image = skimage.transform.resize(
-    image=predicted_image,
-    output_shape=(image.shape[-2], image.shape[-1]),
-    preserve_range=True,
-    order=param.fe_order,
-).astype(np.uint8)
+    # apply padding if required
+    if padding > 0:
+        predicted_image = predicted_image[padding:-padding, padding:-padding]
 
-print(predicted_image.shape)  # (4096, 3072)
-
-
-if padding > 0:
-    predicted_image = predicted_image[padding:-padding, padding:-padding]
-
-# %%
-plt.figure()
-plt.imshow(image_stack[image_idx, :, :], cmap="gray")
-plt.imshow(predicted_image, alpha=0.5, cmap="viridis", interpolation="nearest")
-plt.title(f"Prediction sample: {image_idx} ")
+    ##
+    plt.figure()
+    plt.imshow(image_stack[image_idx, :, :], cmap="gray")
+    plt.imshow(predicted_image, alpha=0.5, cmap="viridis", interpolation="nearest")
+    plt.title(f"Prediction sample: {image_idx} ")
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # TODO next:
 # - Understand why we divide by downsampling factor and fix error
-# - Can we train the classifier on multiple images? Seems like yes?
-#   https://guiwitz.github.io/napari-convpaint/book/Animal_tracking.html#example-use-case-tracking-shark-body-parts-in-a-movie
-# - Do we need to train & evaluate images with debris only?
+# - Do we need to train & evaluate images with debris only? -- seems like a good idea
+# - Try downsampling less?
+# - Try concatenating features from DINO and VGG16? (VGG better resolution?)
+# - Compute accuracy metric & compare feature extractors
+# - One classifier per z-stack?
