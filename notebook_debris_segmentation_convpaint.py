@@ -63,14 +63,30 @@ print("Labels: ", np.unique(annotations_array))
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Set DINOv2 as the feature extractor
-param = conv_paint_param.Param()
-param.fe_name = "dinov2_vits14_reg"
-param.fe_scalings = [1]
-param.fe_order = 0
-param.image_downsample = 10  # 8
+param_dino = conv_paint_param.Param()
+param_dino.fe_name = "dinov2_vits14_reg"
+param_dino.fe_scalings = [1]
+param_dino.fe_order = 0
+param_dino.image_downsample = 10  # 8
 
 # create model
-model = conv_paint.create_model(param)
+model_dino = conv_paint.create_model(param_dino)
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# Set VGG16 as the feature extractor
+param_vgg = conv_paint_param.Param()
+param_vgg.fe_name = "vgg16"
+param_vgg.fe_scalings = [1, 2, 4]
+param_vgg.fe_order = 0
+param_vgg.fe_layers = [
+    "features.0 Conv2d(3, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))",
+    "features.2 Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))",
+]
+param_vgg.image_downsample = 15
+
+# create model
+model_vgg = conv_paint.create_model(param_vgg)
+
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Images classified with debris
@@ -117,7 +133,7 @@ idcs_images_w_debris = [
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Define train / test split only on images with debris
-n_training_samples = math.ceil(0.8*len(idcs_images_w_debris))
+n_training_samples = math.ceil(0.8 * len(idcs_images_w_debris))
 n_test_samples = len(idcs_images_w_debris) - n_training_samples
 
 rng = np.random.default_rng(42)
@@ -130,6 +146,9 @@ print(test_idcs)
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%§
 # Train pixel classifier on multiple debris images
 # TODO: normalise image stack?
+
+model = model_vgg
+param = param_vgg
 
 all_features, all_targets = [], []
 for idx in train_idcs:
@@ -151,18 +170,22 @@ random_forest = conv_paint.train_classifier(features_array, targets_array)
 
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# Run inference on another image (e.g. 15) ---> this throws an error
+# Run inference on another image (e.g. 15) ---> this throws an error with DINO
 # ValueError: cannot reshape array of size 638 into shape (3,3)
 
 # for sanity check: evaluate on same image as training
 # (that should be the best performance)
-image_idx_eval = 6
+for image_idx in test_idcs:
+    predicted_image = model.predict_image(
+        image=image_stack[image_idx, :, :],
+        classifier=random_forest,
+        param=param,
+    )
 
-prediction = model.predict_image(
-    image=image_stack[image_idx_eval, :, :],
-    classifier=random_forest,
-    param=param,
-)
+    plt.figure()
+    plt.imshow(image_stack[image_idx, :, :], cmap="gray")
+    plt.imshow(predicted_image, alpha=0.5, cmap="viridis", interpolation="nearest")
+    plt.title(f"Prediction sample: {image_idx} ")
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # Inspect error in reshaping
@@ -173,7 +196,7 @@ prediction = model.predict_image(
 
 # for sanity check: evaluate on same image as training
 # (that should be the best performance)
-for image_idx in test_idcs: 
+for image_idx in test_idcs:
     # inputs
     image = image_stack[image_idx, :, :]
     classifier = random_forest
@@ -183,7 +206,9 @@ for image_idx in test_idcs:
     padding = param.fe_padding
     if image.ndim == 2:
         image = np.expand_dims(image, axis=0)  # if 2d, prepend an additional dimension
-    image = np.pad(image, ((0, 0), (padding, padding), (padding, padding)), mode="reflect")
+    image = np.pad(
+        image, ((0, 0), (padding, padding), (padding, padding)), mode="reflect"
+    )
 
     # compute feature vectors for each block of pixels (?) in downscaled image
     features = model.get_features_scaled(image, param, return_patches=True)
@@ -238,6 +263,7 @@ for image_idx in test_idcs:
 # - Understand why we divide by downsampling factor and fix error
 # - Do we need to train & evaluate images with debris only? -- seems like a good idea
 # - Try downsampling less?
-# - Try concatenating features from DINO and VGG16? (VGG better resolution?)
+# - Try concatenating features from DINO and VGG16? (VGG better spatial resolution?)
+#   - VGG is grainy ... try more layers?
 # - Compute accuracy metric & compare feature extractors
-# - One classifier per z-stack?
+# - Train one classifier per z-stack?
